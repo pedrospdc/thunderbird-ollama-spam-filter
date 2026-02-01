@@ -63,10 +63,12 @@ async function classifyViaGenerate(settings, emailText) {
       model: settings.model,
       prompt: emailText,
       stream: false,
+      think: false,
       keep_alive: "24h",
       options: {
         num_ctx: 2048,
         num_gpu: 999,
+        temperature: 0,
       },
     }),
   });
