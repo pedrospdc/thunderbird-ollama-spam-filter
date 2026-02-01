@@ -76,18 +76,21 @@ async function classifyViaGenerate(settings, emailText) {
   }
 
   const data = await resp.json();
-  const trimmed = data.response.trim();
+  const rawResponse = data.response.trim();
 
-  // Model may include thinking tags; look for the last 0 or 1
-  const last0 = trimmed.lastIndexOf("0");
-  const last1 = trimmed.lastIndexOf("1");
+  // Strip <think>...</think> blocks so stray digits in reasoning don't
+  // get picked up as the classification output.
+  const output = rawResponse.replace(/<think>[\s\S]*?<\/think>/g, "").trim();
+
+  const last0 = output.lastIndexOf("0");
+  const last1 = output.lastIndexOf("1");
 
   if (last0 === -1 && last1 === -1) {
-    throw new Error(`Unexpected classify response: "${trimmed}"`);
+    throw new Error(`Unexpected classify response: "${rawResponse}"`);
   }
 
   const isSpam = last1 > last0;
-  return { spam: isSpam, confidence: 1.0, model: settings.model, rawResponse: trimmed };
+  return { spam: isSpam, confidence: 1.0, model: settings.model, rawResponse };
 }
 
 // Call Ollama /api/chat with structured JSON output for general models.
