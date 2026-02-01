@@ -5,7 +5,7 @@ const DEFAULT_SETTINGS = {
   spamAction: "junk",
   confidenceThreshold: 0.5,
   concurrency: 4,
-  maxBodyChars: 8000,
+  maxBodyChars: 4000,
   logConversations: false,
   systemPrompt:
     'You are an email spam classifier. Classify as "spam" or "ham". Provide a confidence score from 0.0 to 1.0. HAM (not spam) includes: invoices, receipts, order/shipping confirmations, account notifications, support tickets, service updates, utility reminders, personal messages, and transactional emails. SPAM includes: marketing newsletters in any language, product or service advertisements, promotional offers, e-commerce promotions, unsolicited ads, phishing, scams, fake prizes, and deceptive messages. Any email trying to sell, promote, or advertise a product or service is spam. Newsletters in any language are spam, except Substack newsletters which are ham. Use the provided metadata (List-Unsubscribe, Authentication-Results, Reply-To, etc.) as additional classification signals. Check for coherence between fields: mismatched From and Reply-To domains, failed SPF/DKIM/DMARC authentication, List-Unsubscribe on personal-looking emails, and suspicious attachment types are strong spam indicators. When in doubt, classify as ham.',
@@ -102,7 +102,7 @@ async function classifyViaGenerate(settings, emailText) {
       think: false,
       keep_alive: "24h",
       options: {
-        num_ctx: 4096,
+        num_ctx: 8192,
         num_gpu: 999,
         temperature: 0,
       },
@@ -170,7 +170,7 @@ async function classifyViaChat(settings, emailText) {
       format: CHAT_FORMAT,
       keep_alive: "24h",
       options: {
-        num_ctx: 4096,
+        num_ctx: 8192,
         num_gpu: 999,
       },
     }),
