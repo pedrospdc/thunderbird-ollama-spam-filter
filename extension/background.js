@@ -283,9 +283,19 @@ messenger.runtime.onMessage.addListener(async (request) => {
     return await scanCurrentFolder();
   }
   if (request.action === "getProgress") {
-    return { progress: scanProgress, startTime: scanStartTime };
+    let rate = null;
+    if (scanProgress && scanStartTime && scanProgress.scanned > 0) {
+      const elapsed = (Date.now() - scanStartTime) / 1000;
+      if (elapsed > 0) rate = (scanProgress.scanned / elapsed).toFixed(1);
+    }
+    return { progress: scanProgress, rate };
   }
   if (request.action === "getState") {
-    return { progress: scanProgress, startTime: scanStartTime, lastResult: lastScanResult };
+    let rate = null;
+    if (scanProgress && scanStartTime && scanProgress.scanned > 0) {
+      const elapsed = (Date.now() - scanStartTime) / 1000;
+      if (elapsed > 0) rate = (scanProgress.scanned / elapsed).toFixed(1);
+    }
+    return { progress: scanProgress, rate, lastResult: lastScanResult };
   }
 });

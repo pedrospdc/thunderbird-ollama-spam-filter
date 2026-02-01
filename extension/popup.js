@@ -5,32 +5,13 @@ const progressText = document.getElementById("progressText");
 const statusDiv = document.getElementById("status");
 
 let polling = null;
-let lastScanned = 0;
-let lastTime = 0;
-let rate = 0;
 
-function updateProgressUI(progress, startTime) {
+function updateProgressUI(progress, rate) {
   if (!progress || progress.total === 0) return;
-
-  const now = Date.now();
-  const elapsed = (now - lastTime) / 1000;
-  if (elapsed > 0 && progress.scanned > lastScanned) {
-    const instantRate = (progress.scanned - lastScanned) / elapsed;
-    // Smooth with exponential moving average (0.2 = slow, stable updates)
-    rate = rate === 0 ? instantRate : rate * 0.8 + instantRate * 0.2;
-    lastScanned = progress.scanned;
-    lastTime = now;
-  }
-  // On first poll after reopen, estimate rate from overall progress
-  if (rate === 0 && startTime && progress.scanned > 0) {
-    rate = progress.scanned / ((now - startTime) / 1000);
-    lastScanned = progress.scanned;
-    lastTime = now;
-  }
 
   const pct = Math.round((progress.scanned / progress.total) * 100);
   progressBar.style.width = pct + "%";
-  const rateStr = rate > 0 ? ` — ${rate.toFixed(1)} emails/s` : "";
+  const rateStr = rate ? ` — ${rate} emails/s` : "";
   progressText.textContent = `${progress.scanned}/${progress.total} — ${progress.spamFound} spam found${rateStr}`;
 }
 
@@ -47,9 +28,8 @@ function startPolling() {
     try {
       const state = await messenger.runtime.sendMessage({ action: "getProgress" });
       if (state && state.progress) {
-        updateProgressUI(state.progress, state.startTime);
+        updateProgressUI(state.progress, state.rate);
       } else {
-        // Scan finished while we were polling
         clearInterval(polling);
         polling = null;
       }
@@ -62,15 +42,13 @@ async function restoreState() {
   try {
     const state = await messenger.runtime.sendMessage({ action: "getState" });
     if (state && state.progress) {
-      // Scan is in progress
       scanBtn.disabled = true;
       scanBtn.textContent = "Scanning...";
       progressDiv.style.display = "block";
       statusDiv.textContent = "";
-      updateProgressUI(state.progress, state.startTime);
+      updateProgressUI(state.progress, state.rate);
       startPolling();
     } else if (state && state.lastResult) {
-      // A scan finished recently
       progressDiv.style.display = "block";
       showDone(state.lastResult);
     }
@@ -82,9 +60,6 @@ scanBtn.addEventListener("click", async () => {
   scanBtn.textContent = "Scanning...";
   progressDiv.style.display = "block";
   statusDiv.textContent = "";
-  lastScanned = 0;
-  lastTime = Date.now();
-  rate = 0;
 
   startPolling();
 
