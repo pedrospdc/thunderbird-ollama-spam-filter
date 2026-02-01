@@ -20,10 +20,30 @@ const CHAT_FORMAT = {
   required: ["classification", "confidence"],
 };
 
+const TAG_HAM = "ham_verified";
+const TAG_SPAM = "spam_detected";
+
 let scanProgress = null;
 let scanStartTime = null;
 let lastScanResult = null;
 let scanCancelled = false;
+let reviewProgress = null;
+let reviewStartTime = null;
+let lastReviewResult = null;
+let reviewCancelled = false;
+
+async function ensureTags() {
+  const existing = await messenger.messages.tags.list();
+  const keys = existing.map((t) => t.key);
+  if (!keys.includes(TAG_HAM)) {
+    await messenger.messages.tags.create(TAG_HAM, "Ham Verified", "#4CAF50");
+  }
+  if (!keys.includes(TAG_SPAM)) {
+    await messenger.messages.tags.create(TAG_SPAM, "Spam Detected", "#F44336");
+  }
+}
+
+ensureTags();
 
 async function getSettings() {
   const { settings } = await messenger.storage.local.get("settings");
@@ -237,7 +257,10 @@ messenger.messages.onNewMailReceived.addListener(async (folder, messageList) => 
         console.log(
           `Spam detected: "${message.subject}" (confidence: ${result.confidence})`,
         );
+        await messenger.messages.tag(message.id, TAG_SPAM);
         await handleSpam(message.id, settings, folder.accountId);
+      } else {
+        await messenger.messages.tag(message.id, TAG_HAM);
       }
     } catch (err) {
       console.error("Spam filter error:", err);
@@ -288,8 +311,11 @@ async function scanCurrentFolder() {
           result.spam &&
           result.confidence >= settings.confidenceThreshold
         ) {
+          await messenger.messages.tag(message.id, TAG_SPAM);
           await handleSpam(message.id, settings, folder.accountId);
           scanProgress.spamFound++;
+        } else {
+          await messenger.messages.tag(message.id, TAG_HAM);
         }
       } catch (err) {
         console.error(`Error classifying message ${message.id}:`, err);
@@ -309,6 +335,71 @@ async function scanCurrentFolder() {
   scanProgress = null;
   scanStartTime = null;
   scanCancelled = false;
+  return result;
+}
+
+// Review all messages in Junk folders, reclassify, and restore false positives
+async function reviewSpam() {
+  const settings = await getSettings();
+  const accounts = await messenger.accounts.list();
+
+  const allMessages = [];
+  for (const account of accounts) {
+    const junk = await findSpecialFolder(account.id, "junk");
+    if (!junk) continue;
+    let page = await messenger.messages.list(junk.id);
+    allMessages.push(...page.messages.map((m) => ({ message: m, accountId: account.id })));
+    while (page.id) {
+      page = await messenger.messages.continueList(page.id);
+      allMessages.push(...page.messages.map((m) => ({ message: m, accountId: account.id })));
+    }
+  }
+
+  reviewStartTime = Date.now();
+  lastReviewResult = null;
+  reviewCancelled = false;
+  reviewProgress = { total: allMessages.length, scanned: 0, restored: 0 };
+
+  const concurrency = settings.concurrency || 4;
+  let idx = 0;
+
+  async function worker() {
+    while (idx < allMessages.length && !reviewCancelled) {
+      const { message, accountId } = allMessages[idx++];
+      try {
+        const result = await classifyMessage(message.id, settings);
+        if (
+          !result ||
+          !result.spam ||
+          result.confidence < settings.confidenceThreshold
+        ) {
+          // Reclassified as ham — restore to inbox
+          await messenger.messages.untag(message.id, TAG_SPAM);
+          await messenger.messages.tag(message.id, TAG_HAM);
+          const inbox = await findSpecialFolder(accountId, "inbox");
+          if (inbox) {
+            await messenger.messages.move([message.id], inbox.id);
+          }
+          reviewProgress.restored++;
+        }
+      } catch (err) {
+        console.error(`Error reviewing message ${message.id}:`, err);
+      }
+      reviewProgress.scanned++;
+    }
+  }
+
+  const workers = Array.from({ length: concurrency }, () => worker());
+  await Promise.all(workers);
+
+  const totalSec = (Date.now() - reviewStartTime) / 1000;
+  const avgRate = totalSec > 0 ? (reviewProgress.scanned / totalSec).toFixed(1) : "0";
+  const cancelled = reviewCancelled;
+  const result = { ...reviewProgress, avgRate, cancelled };
+  lastReviewResult = result;
+  reviewProgress = null;
+  reviewStartTime = null;
+  reviewCancelled = false;
   return result;
 }
 
@@ -335,6 +426,29 @@ messenger.runtime.onMessage.addListener(async (request) => {
       const elapsed = (Date.now() - scanStartTime) / 1000;
       if (elapsed > 0) rate = (scanProgress.scanned / elapsed).toFixed(1);
     }
-    return { progress: scanProgress, rate, lastResult: lastScanResult };
+    let reviewRate = null;
+    if (reviewProgress && reviewStartTime && reviewProgress.scanned > 0) {
+      const elapsed = (Date.now() - reviewStartTime) / 1000;
+      if (elapsed > 0) reviewRate = (reviewProgress.scanned / elapsed).toFixed(1);
+    }
+    return {
+      progress: scanProgress, rate, lastResult: lastScanResult,
+      reviewProgress, reviewRate, lastReviewResult,
+    };
+  }
+  if (request.action === "reviewSpam") {
+    return await reviewSpam();
+  }
+  if (request.action === "stopReview") {
+    reviewCancelled = true;
+    return { ok: true };
+  }
+  if (request.action === "getReviewProgress") {
+    let rate = null;
+    if (reviewProgress && reviewStartTime && reviewProgress.scanned > 0) {
+      const elapsed = (Date.now() - reviewStartTime) / 1000;
+      if (elapsed > 0) rate = (reviewProgress.scanned / elapsed).toFixed(1);
+    }
+    return { progress: reviewProgress, rate };
   }
 });

@@ -5,7 +5,15 @@ const progressBar = document.getElementById("progressBar");
 const progressText = document.getElementById("progressText");
 const statusDiv = document.getElementById("status");
 
+const reviewBtn = document.getElementById("reviewBtn");
+const stopReviewBtn = document.getElementById("stopReviewBtn");
+const reviewProgressDiv = document.getElementById("reviewProgress");
+const reviewProgressBar = document.getElementById("reviewProgressBar");
+const reviewProgressText = document.getElementById("reviewProgressText");
+const reviewStatusDiv = document.getElementById("reviewStatus");
+
 let polling = null;
+let reviewPolling = null;
 
 function updateProgressUI(progress, rate) {
   if (!progress || progress.total === 0) return;
@@ -62,6 +70,14 @@ async function restoreState() {
       progressDiv.style.display = "block";
       showDone(state.lastResult);
     }
+    if (state && state.reviewProgress) {
+      setReviewingUI();
+      updateReviewProgressUI(state.reviewProgress, state.reviewRate);
+      startReviewPolling();
+    } else if (state && state.lastReviewResult) {
+      reviewProgressDiv.style.display = "block";
+      showReviewDone(state.lastReviewResult);
+    }
   } catch (_) {}
 }
 
@@ -87,6 +103,72 @@ stopBtn.addEventListener("click", async () => {
   stopBtn.disabled = true;
   stopBtn.textContent = "Stopping...";
   await messenger.runtime.sendMessage({ action: "stopScan" });
+});
+
+function updateReviewProgressUI(progress, rate) {
+  if (!progress || progress.total === 0) return;
+  const pct = Math.round((progress.scanned / progress.total) * 100);
+  reviewProgressBar.style.width = pct + "%";
+  const rateStr = rate ? ` — ${rate} emails/s` : "";
+  reviewProgressText.textContent = `${progress.scanned}/${progress.total} — ${progress.restored} restored${rateStr}`;
+}
+
+function setReviewingUI() {
+  reviewBtn.disabled = true;
+  reviewBtn.textContent = "Reviewing...";
+  stopReviewBtn.style.display = "block";
+  reviewProgressDiv.style.display = "block";
+  reviewStatusDiv.textContent = "";
+}
+
+function showReviewDone(result) {
+  const prefix = result.cancelled ? "Stopped" : "Done";
+  reviewProgressBar.style.width = result.cancelled
+    ? Math.round((result.scanned / result.total) * 100) + "%"
+    : "100%";
+  reviewStatusDiv.textContent = `${prefix}. Reviewed ${result.scanned} messages, restored ${result.restored}. (${result.avgRate} emails/s)`;
+  reviewBtn.disabled = false;
+  reviewBtn.textContent = "Review Spam";
+  stopReviewBtn.style.display = "none";
+}
+
+function startReviewPolling() {
+  if (reviewPolling) return;
+  reviewPolling = setInterval(async () => {
+    try {
+      const state = await messenger.runtime.sendMessage({ action: "getReviewProgress" });
+      if (state && state.progress) {
+        updateReviewProgressUI(state.progress, state.rate);
+      } else {
+        clearInterval(reviewPolling);
+        reviewPolling = null;
+      }
+    } catch (_) {}
+  }, 500);
+}
+
+reviewBtn.addEventListener("click", async () => {
+  setReviewingUI();
+  startReviewPolling();
+
+  try {
+    const result = await messenger.runtime.sendMessage({ action: "reviewSpam" });
+    showReviewDone(result);
+  } catch (err) {
+    reviewStatusDiv.textContent = `Error: ${err.message}`;
+    reviewBtn.disabled = false;
+    reviewBtn.textContent = "Review Spam";
+    stopReviewBtn.style.display = "none";
+  }
+
+  clearInterval(reviewPolling);
+  reviewPolling = null;
+});
+
+stopReviewBtn.addEventListener("click", async () => {
+  stopReviewBtn.disabled = true;
+  stopReviewBtn.textContent = "Stopping...";
+  await messenger.runtime.sendMessage({ action: "stopReview" });
 });
 
 restoreState();

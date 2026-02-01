@@ -13,6 +13,7 @@
     "messagesRead",
     "messagesMove",
     "messagesDelete",
+    "messagesTags",
     "accountsRead",
     "storage"
   ],

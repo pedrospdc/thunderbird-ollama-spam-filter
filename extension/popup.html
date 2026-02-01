@@ -24,6 +24,14 @@
     <div id="progressText"></div>
   </div>
   <div id="status"></div>
+  <hr style="margin: 12px 0; border: none; border-top: 1px solid #ddd;">
+  <button id="reviewBtn">Review Spam</button>
+  <button id="stopReviewBtn" style="display: none; margin-top: 6px; background: #e57373; color: white; border-color: #c62828;">Stop Review</button>
+  <div id="reviewProgress" style="display: none; margin-top: 10px;">
+    <div class="bar"><div class="bar-fill" id="reviewProgressBar"></div></div>
+    <div id="reviewProgressText" style="margin-top: 4px; color: #666;"></div>
+  </div>
+  <div id="reviewStatus" style="margin-top: 10px; color: #333;"></div>
   <script src="popup.js"></script>
 </body>
 </html>
