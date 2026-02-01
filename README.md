@@ -29,17 +29,34 @@ ollama pull qwen3:1.7b
 
 ### 2. Allow the extension to reach Ollama
 
-Set the `OLLAMA_ORIGINS` environment variable before starting Ollama:
+Set environment variables before starting Ollama:
 
 ```bash
-OLLAMA_ORIGINS="moz-extension://*" ollama serve
+OLLAMA_ORIGINS="*" OLLAMA_FLASH_ATTENTION=1 OLLAMA_NUM_PARALLEL=4 ollama serve
+```
+
+On Windows (PowerShell):
+
+```powershell
+$env:OLLAMA_ORIGINS="*"
+$env:OLLAMA_FLASH_ATTENTION="1"
+$env:OLLAMA_NUM_PARALLEL="4"
+ollama serve
 ```
 
 ### 3. Install the extension
 
+Download `ai-spam-filter.xpi` from the [latest release](../../releases/latest), then:
+
 1. Open Thunderbird → Add-ons Manager
 2. Gear icon → Install Add-on From File
-3. Select the `extension/manifest.json` file
+3. Select the downloaded `.xpi` file
+
+Alternatively, for development, load it as a temporary add-on:
+
+1. Go to Tools → Developer Tools → Debug Add-ons (or `about:debugging`)
+2. Click "Load Temporary Add-on"
+3. Select `extension/manifest.json`
 
 ### 4. Configure
 
@@ -50,6 +67,7 @@ Extension settings (Add-ons Manager → AI Spam Filter → Options):
 - **Model Type** — `classify` (binary 0/1 models) or `chat` (structured JSON via system prompt)
 - **Spam Action** — Move to Junk (default), Move to Trash, or Delete Permanently
 - **Confidence Threshold** — 0.0 to 1.0
+- **Log classifications** — log email subject and model response to Thunderbird's debug console
 
 ## Usage
 
