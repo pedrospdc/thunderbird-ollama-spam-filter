@@ -45,6 +45,21 @@ async function ensureTags() {
 
 ensureTags();
 
+async function addTag(messageId, tagKey) {
+  const msg = await messenger.messages.get(messageId);
+  const tags = msg.tags || [];
+  if (!tags.includes(tagKey)) {
+    tags.push(tagKey);
+    await messenger.messages.update(messageId, { tags });
+  }
+}
+
+async function removeTag(messageId, tagKey) {
+  const msg = await messenger.messages.get(messageId);
+  const tags = (msg.tags || []).filter((t) => t !== tagKey);
+  await messenger.messages.update(messageId, { tags });
+}
+
 async function getSettings() {
   const { settings } = await messenger.storage.local.get("settings");
   return { ...DEFAULT_SETTINGS, ...(settings || {}) };
@@ -257,10 +272,10 @@ messenger.messages.onNewMailReceived.addListener(async (folder, messageList) => 
         console.log(
           `Spam detected: "${message.subject}" (confidence: ${result.confidence})`,
         );
-        await messenger.messages.tag(message.id, TAG_SPAM);
+        await addTag(message.id, TAG_SPAM);
         await handleSpam(message.id, settings, folder.accountId);
       } else {
-        await messenger.messages.tag(message.id, TAG_HAM);
+        await addTag(message.id, TAG_HAM);
       }
     } catch (err) {
       console.error("Spam filter error:", err);
@@ -311,11 +326,11 @@ async function scanCurrentFolder() {
           result.spam &&
           result.confidence >= settings.confidenceThreshold
         ) {
-          await messenger.messages.tag(message.id, TAG_SPAM);
+          await addTag(message.id, TAG_SPAM);
           await handleSpam(message.id, settings, folder.accountId);
           scanProgress.spamFound++;
         } else {
-          await messenger.messages.tag(message.id, TAG_HAM);
+          await addTag(message.id, TAG_HAM);
         }
       } catch (err) {
         console.error(`Error classifying message ${message.id}:`, err);
@@ -374,8 +389,8 @@ async function reviewSpam() {
           result.confidence < settings.confidenceThreshold
         ) {
           // Reclassified as ham — restore to inbox
-          await messenger.messages.untag(message.id, TAG_SPAM);
-          await messenger.messages.tag(message.id, TAG_HAM);
+          await removeTag(message.id, TAG_SPAM);
+          await addTag(message.id, TAG_HAM);
           const inbox = await findSpecialFolder(accountId, "inbox");
           if (inbox) {
             await messenger.messages.move([message.id], inbox.id);
