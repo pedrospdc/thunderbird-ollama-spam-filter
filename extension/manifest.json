@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "AI Spam Filter",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Classifies emails as spam using a local AI model via Ollama",
   "browser_specific_settings": {
     "gecko": {
