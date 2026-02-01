@@ -9,7 +9,7 @@ const DEFAULT_SETTINGS = {
   contextSize: 8192,
   logConversations: false,
   systemPrompt:
-    'You are an email spam classifier. Classify as "spam" or "ham". Provide a confidence score from 0.0 to 1.0. HAM (not spam) includes: invoices, receipts, order/shipping confirmations, account notifications, support tickets, service updates, utility reminders, personal messages, and transactional emails. SPAM includes: marketing newsletters in any language, product or service advertisements, promotional offers, e-commerce promotions, unsolicited ads, phishing, scams, fake prizes, and deceptive messages. Any email trying to sell, promote, or advertise a product or service is spam. Newsletters in any language are spam, except Substack newsletters which are ham. Use the provided metadata (List-Unsubscribe, Authentication-Results, Reply-To, etc.) as additional classification signals. Check for coherence between fields: mismatched From and Reply-To domains, failed SPF/DKIM/DMARC authentication, List-Unsubscribe on personal-looking emails, and suspicious attachment types are strong spam indicators. When in doubt, classify as ham.',
+    'You are an email spam classifier. Classify as "spam" or "ham". Provide a confidence score from 0.0 to 1.0. HAM (not spam) includes: invoices, receipts, order/shipping confirmations, account notifications, support tickets, service updates, utility reminders, personal messages, and transactional emails. SPAM includes: marketing newsletters in any language, product or service advertisements, promotional offers, e-commerce promotions, unsolicited ads, recruitment emails, community newsletters, weekly digests, "best of" roundups, event invitations, phishing, scams, fake prizes, and deceptive messages. Any email trying to sell, promote, or advertise a product or service is spam. Newsletters in any language are spam, except Substack newsletters which are ham. Use the provided metadata (List-Unsubscribe, Authentication-Results, Reply-To, etc.) as additional classification signals. Check for coherence between fields: mismatched From and Reply-To domains, failed SPF/DKIM/DMARC authentication, List-Unsubscribe on personal-looking emails, and suspicious attachment types are strong spam indicators. Pay attention to the email footer — unsubscribe links, company addresses, and mailing list disclaimers indicate bulk/marketing mail. When in doubt, classify as ham.',
 };
 
 const CHAT_FORMAT = {
@@ -200,10 +200,13 @@ async function classifyMessage(messageId, settings) {
   // Count URLs before truncation
   const urlCount = (body.match(/https?:\/\//g) || []).length;
 
-  // Truncate body — spam signals are in the first few thousand chars.
-  // Shorter input = faster inference and less VRAM.
-  if (body.length > settings.maxBodyChars) {
-    body = body.slice(0, settings.maxBodyChars);
+  // Include head + tail of body — spam signals are often at the start
+  // (subject matter) and end (unsubscribe links, company footers).
+  const maxChars = settings.maxBodyChars || 4000;
+  if (body.length > maxChars) {
+    const headSize = Math.round(maxChars * 0.75);
+    const tailSize = maxChars - headSize;
+    body = body.slice(0, headSize) + "\n[...]\n" + body.slice(-tailSize);
   }
   const from = header.author || "";
   const to = (header.recipients || []).join(", ");
@@ -229,7 +232,9 @@ async function classifyMessage(messageId, settings) {
 
   const authResults = full.headers && full.headers["authentication-results"] && full.headers["authentication-results"][0];
   if (authResults) {
-    lines.push(`Authentication-Results: ${authResults.slice(0, 200)}`);
+    // Extract just the verdicts (spf=pass, dkim=fail, dmarc=none, etc.)
+    const verdicts = authResults.match(/(?:spf|dkim|dmarc|arc)=[a-z]+/gi);
+    lines.push(`Authentication-Results: ${verdicts ? verdicts.join("; ") : "none"}`);
   }
 
   try {
