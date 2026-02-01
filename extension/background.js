@@ -4,6 +4,9 @@ const DEFAULT_SETTINGS = {
   modelType: "classify",
   spamAction: "junk",
   confidenceThreshold: 0.5,
+  concurrency: 4,
+  maxBodyChars: 2000,
+  logConversations: false,
   systemPrompt:
     'You are an email spam classifier. Analyze the email and respond with a JSON object. Classify as "spam" or "ham". Provide a confidence score from 0.0 to 1.0.',
 };
@@ -18,6 +21,8 @@ const CHAT_FORMAT = {
 };
 
 let scanProgress = null;
+let scanStartTime = null;
+let lastScanResult = null;
 
 async function getSettings() {
   const { settings } = await messenger.storage.local.get("settings");
@@ -58,6 +63,11 @@ async function classifyViaGenerate(settings, emailText) {
       model: settings.model,
       prompt: emailText,
       stream: false,
+      keep_alive: "24h",
+      options: {
+        num_ctx: 2048,
+        num_gpu: 999,
+      },
     }),
   });
 
@@ -77,7 +87,7 @@ async function classifyViaGenerate(settings, emailText) {
   }
 
   const isSpam = last1 > last0;
-  return { spam: isSpam, confidence: 1.0, model: settings.model };
+  return { spam: isSpam, confidence: 1.0, model: settings.model, rawResponse: trimmed };
 }
 
 // Call Ollama /api/chat with structured JSON output for general models.
@@ -93,6 +103,11 @@ async function classifyViaChat(settings, emailText) {
       ],
       stream: false,
       format: CHAT_FORMAT,
+      keep_alive: "24h",
+      options: {
+        num_ctx: 2048,
+        num_gpu: 999,
+      },
     }),
   });
 
@@ -107,19 +122,36 @@ async function classifyViaChat(settings, emailText) {
     spam: parsed.classification === "spam",
     confidence: parsed.confidence,
     model: settings.model,
+    rawResponse: data.message.content,
   };
 }
 
 async function classifyMessage(messageId, settings) {
   const header = await messenger.messages.get(messageId);
   const full = await messenger.messages.getFull(messageId);
-  const body = extractText(full);
+  let body = extractText(full);
+  // Truncate body — spam signals are in the first few thousand chars.
+  // Shorter input = faster inference and less VRAM.
+  if (body.length > settings.maxBodyChars) {
+    body = body.slice(0, settings.maxBodyChars);
+  }
   const emailText = `Subject: ${header.subject || ""}\n\nBody: ${body}`;
 
+  let result;
   if (settings.modelType === "chat") {
-    return classifyViaChat(settings, emailText);
+    result = await classifyViaChat(settings, emailText);
+  } else {
+    result = await classifyViaGenerate(settings, emailText);
   }
-  return classifyViaGenerate(settings, emailText);
+
+  if (settings.logConversations) {
+    const classification = result.spam ? "SPAM" : "HAM";
+    console.log(
+      `[AI Spam Filter] Subject: "${header.subject || "(no subject)"}" → ${classification} (confidence: ${result.confidence}) | Response: ${result.rawResponse}`,
+    );
+  }
+
+  return result;
 }
 
 async function findSpecialFolder(accountId, specialUse) {
@@ -205,27 +237,43 @@ async function scanCurrentFolder() {
     allMessages.push(...page.messages);
   }
 
+  scanStartTime = Date.now();
+  lastScanResult = null;
   scanProgress = { total: allMessages.length, scanned: 0, spamFound: 0 };
 
-  for (const message of allMessages) {
-    try {
-      const result = await classifyMessage(message.id, settings);
-      if (
-        result &&
-        result.spam &&
-        result.confidence >= settings.confidenceThreshold
-      ) {
-        await handleSpam(message.id, settings, folder.accountId);
-        scanProgress.spamFound++;
+  // Process messages concurrently (matches OLLAMA_NUM_PARALLEL).
+  const concurrency = settings.concurrency || 4;
+  let idx = 0;
+
+  async function worker() {
+    while (idx < allMessages.length) {
+      const message = allMessages[idx++];
+      try {
+        const result = await classifyMessage(message.id, settings);
+        if (
+          result &&
+          result.spam &&
+          result.confidence >= settings.confidenceThreshold
+        ) {
+          await handleSpam(message.id, settings, folder.accountId);
+          scanProgress.spamFound++;
+        }
+      } catch (err) {
+        console.error(`Error classifying message ${message.id}:`, err);
       }
-    } catch (err) {
-      console.error(`Error classifying message ${message.id}:`, err);
+      scanProgress.scanned++;
     }
-    scanProgress.scanned++;
   }
 
-  const result = { ...scanProgress };
+  const workers = Array.from({ length: concurrency }, () => worker());
+  await Promise.all(workers);
+
+  const totalSec = (Date.now() - scanStartTime) / 1000;
+  const avgRate = totalSec > 0 ? (scanProgress.scanned / totalSec).toFixed(1) : "0";
+  const result = { ...scanProgress, avgRate };
+  lastScanResult = result;
   scanProgress = null;
+  scanStartTime = null;
   return result;
 }
 
@@ -235,6 +283,9 @@ messenger.runtime.onMessage.addListener(async (request) => {
     return await scanCurrentFolder();
   }
   if (request.action === "getProgress") {
-    return scanProgress;
+    return { progress: scanProgress, startTime: scanStartTime };
+  }
+  if (request.action === "getState") {
+    return { progress: scanProgress, startTime: scanStartTime, lastResult: lastScanResult };
   }
 });

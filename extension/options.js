@@ -21,6 +21,8 @@ async function loadSettings() {
   document.getElementById("spamAction").value = s.spamAction || "junk";
   document.getElementById("confidenceThreshold").value =
     s.confidenceThreshold ?? 0.5;
+  document.getElementById("logConversations").checked =
+    s.logConversations || false;
   toggleChatOptions();
 }
 
@@ -36,6 +38,7 @@ document.getElementById("saveBtn").addEventListener("click", async () => {
     confidenceThreshold: parseFloat(
       document.getElementById("confidenceThreshold").value,
     ),
+    logConversations: document.getElementById("logConversations").checked,
   };
   await messenger.storage.local.set({ settings });
   const saved = document.getElementById("saved");
