@@ -1,24 +1,45 @@
 /**
  * Tests for the classify response parsing logic from background.js.
- * Run with: node test/parse-response.test.js
+ * Run with: node --test test/parse-response.test.js
  */
 
 const { describe, it } = require("node:test");
 const assert = require("node:assert/strict");
 
+/**
+ * Mirrors the parsing logic in classifyViaGenerate().
+ */
 function parseClassifyResponse(rawResponse) {
   const output = rawResponse
     .replace(/<think>[\s\S]*?<\/think>/g, "")
     .trim();
 
-  const last0 = output.lastIndexOf("0");
-  const last1 = output.lastIndexOf("1");
+  const has0 = output.includes("0");
+  const has1 = output.includes("1");
 
-  if (last0 === -1 && last1 === -1) {
+  if (!has0 && !has1) {
+    // Fallback: infer from think block reasoning
+    const thinkMatch = rawResponse.match(/<think>[\s\S]*?<\/think>/);
+    if (thinkMatch) {
+      const t = thinkMatch[0].toLowerCase();
+      const hamPatterns = ["not spam", "not indicative of spam", "is ham",
+        "is legitimate", "is not", "legitimate email"];
+      const spamPatterns = ["classifying as spam", "is spam", "spam content",
+        "typical of spam", "likely spam", "indicates spam"];
+      const hamHits = hamPatterns.filter((p) => t.includes(p)).length;
+      const spamHits = spamPatterns.filter((p) => t.includes(p)).length;
+      if (spamHits > hamHits) return { spam: true, confidence: 0.7 };
+      if (hamHits > spamHits) return { spam: false, confidence: 0.7 };
+    }
     throw new Error(`Unexpected classify response: "${rawResponse}"`);
   }
 
-  return { spam: last1 > last0 };
+  let isSpam;
+  if (has0 && !has1) isSpam = false;
+  else if (has1 && !has0) isSpam = true;
+  else isSpam = output.lastIndexOf("1") > output.lastIndexOf("0");
+
+  return { spam: isSpam, confidence: 1.0 };
 }
 
 describe("parseClassifyResponse", () => {
@@ -102,17 +123,45 @@ describe("parseClassifyResponse", () => {
     });
   });
 
-  describe("error cases", () => {
-    it("throws on empty output after stripping think", () => {
-      assert.throws(() => parseClassifyResponse("<think>Some reasoning.</think>"));
+  describe("stray text in output (model outputs letter instead of digit)", () => {
+    it("think block + stray letter A → falls back to think reasoning (spam)", () => {
+      const r = parseClassifyResponse(
+        "<think>The message appears to be a summary of an article with a hashtag, which is typical of spam content.</think>\n\nA",
+      );
+      assert.equal(r.spam, true);
+      assert.equal(r.confidence, 0.7);
     });
 
-    it("throws on no digits", () => {
+    it("think block + stray letter → falls back to think reasoning (not spam)", () => {
+      const r = parseClassifyResponse(
+        "<think>This is not spam, it is a legitimate email.</think>\n\nB",
+      );
+      assert.equal(r.spam, false);
+      assert.equal(r.confidence, 0.7);
+    });
+
+    it("think block with 'is ham' + stray text → ham", () => {
+      const r = parseClassifyResponse(
+        "<think>This message is ham.</think>\n\nX",
+      );
+      assert.equal(r.spam, false);
+      assert.equal(r.confidence, 0.7);
+    });
+  });
+
+  describe("error cases", () => {
+    it("throws on empty think with no reasoning keywords", () => {
+      assert.throws(() =>
+        parseClassifyResponse("<think>Some generic reasoning.</think>"),
+      );
+    });
+
+    it("throws on no digits and no think block", () => {
       assert.throws(() => parseClassifyResponse("ham"));
     });
 
-    it("throws on only text no digits", () => {
-      assert.throws(() => parseClassifyResponse("this is spam"));
+    it("throws on only text no digits no think", () => {
+      assert.throws(() => parseClassifyResponse("this is an email"));
     });
   });
 });

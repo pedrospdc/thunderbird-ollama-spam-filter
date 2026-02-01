@@ -61,7 +61,7 @@ async function classifyViaGenerate(settings, emailText) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       model: settings.model,
-      prompt: emailText,
+      prompt: "/no_think " + emailText,
       stream: false,
       think: false,
       keep_alive: "24h",
@@ -80,18 +80,42 @@ async function classifyViaGenerate(settings, emailText) {
   const data = await resp.json();
   const rawResponse = data.response.trim();
 
-  // Strip <think>...</think> blocks so stray digits in reasoning don't
-  // get picked up as the classification output.
+  // Strip <think>...</think> blocks in case the model still produces them.
   const output = rawResponse.replace(/<think>[\s\S]*?<\/think>/g, "").trim();
 
-  const last0 = output.lastIndexOf("0");
-  const last1 = output.lastIndexOf("1");
+  // Look for 0 or 1 anywhere in the output (model sometimes adds stray text).
+  const has0 = output.includes("0");
+  const has1 = output.includes("1");
 
-  if (last0 === -1 && last1 === -1) {
+  if (!has0 && !has1) {
+    // Fallback: infer from think block reasoning when the model outputs
+    // no valid digit. Check for ham indicators first (more specific),
+    // then spam indicators.
+    const thinkMatch = rawResponse.match(/<think>[\s\S]*?<\/think>/);
+    if (thinkMatch) {
+      const t = thinkMatch[0].toLowerCase();
+      const hamPatterns = ["not spam", "not indicative of spam", "is ham",
+        "is legitimate", "is not", "legitimate email"];
+      const spamPatterns = ["classifying as spam", "is spam", "spam content",
+        "typical of spam", "likely spam", "indicates spam"];
+      const hamHits = hamPatterns.filter((p) => t.includes(p)).length;
+      const spamHits = spamPatterns.filter((p) => t.includes(p)).length;
+      if (spamHits > hamHits) {
+        return { spam: true, confidence: 0.7, model: settings.model, rawResponse };
+      }
+      if (hamHits > spamHits) {
+        return { spam: false, confidence: 0.7, model: settings.model, rawResponse };
+      }
+    }
     throw new Error(`Unexpected classify response: "${rawResponse}"`);
   }
 
-  const isSpam = last1 > last0;
+  // If only one digit is present, use it. If both, use the last one.
+  let isSpam;
+  if (has0 && !has1) isSpam = false;
+  else if (has1 && !has0) isSpam = true;
+  else isSpam = output.lastIndexOf("1") > output.lastIndexOf("0");
+
   return { spam: isSpam, confidence: 1.0, model: settings.model, rawResponse };
 }
 
