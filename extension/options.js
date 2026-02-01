@@ -21,6 +21,9 @@ async function loadSettings() {
   document.getElementById("spamAction").value = s.spamAction || "junk";
   document.getElementById("confidenceThreshold").value =
     s.confidenceThreshold ?? 0.5;
+  document.getElementById("concurrency").value = s.concurrency ?? 4;
+  document.getElementById("maxBodyChars").value = s.maxBodyChars ?? 4000;
+  document.getElementById("contextSize").value = s.contextSize ?? 8192;
   document.getElementById("logConversations").checked =
     s.logConversations || false;
   toggleChatOptions();
@@ -38,6 +41,9 @@ document.getElementById("saveBtn").addEventListener("click", async () => {
     confidenceThreshold: parseFloat(
       document.getElementById("confidenceThreshold").value,
     ),
+    concurrency: parseInt(document.getElementById("concurrency").value, 10),
+    maxBodyChars: parseInt(document.getElementById("maxBodyChars").value, 10),
+    contextSize: parseInt(document.getElementById("contextSize").value, 10),
     logConversations: document.getElementById("logConversations").checked,
   };
   await messenger.storage.local.set({ settings });
