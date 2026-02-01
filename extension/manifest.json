@@ -1,0 +1,29 @@
+{
+  "manifest_version": 3,
+  "name": "AI Spam Filter",
+  "version": "1.0.0",
+  "description": "Classifies emails as spam using a local AI model via Ollama",
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "ai-spam-filter@pedrospdc",
+      "strict_min_version": "128.0"
+    }
+  },
+  "permissions": [
+    "messagesRead",
+    "messagesMove",
+    "messagesDelete",
+    "accountsRead",
+    "storage"
+  ],
+  "background": {
+    "scripts": ["background.js"]
+  },
+  "action": {
+    "default_title": "AI Spam Filter",
+    "default_popup": "popup.html"
+  },
+  "options_ui": {
+    "page": "options.html"
+  }
+}
